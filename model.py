@@ -11,6 +11,8 @@ import pandas as pd
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('TkAgg')
 import numpy as np
 
 import torch.optim as optim
@@ -41,11 +43,20 @@ class FathomNetDataset(Dataset):
         annotations_df = pd.DataFrame(coco_data['annotations'])
 
         # 3. Merge them so every filename is matched with its category_id
-        # In COCO JSON, images use 'id' and annotations use 'image_id'
         merged_df = pd.merge(annotations_df, images_df, left_on='image_id', right_on='id')
 
-        # 4. Save the final mapping
-        self.img_labels = merged_df[['file_name', 'category_id']]
+        # 4. CRITICAL FIX: Filter out missing images
+        # Check the hard drive and ONLY keep rows in the JSON that match downloaded files
+        existing_files = set(os.listdir(img_dir))
+        filtered_df = merged_df[merged_df['file_name'].isin(existing_files)]
+
+        if len(filtered_df) == 0:
+            raise RuntimeError(f"Could not find any images in {img_dir} that match the JSON.")
+
+        print(f"Success: Found {len(filtered_df)} downloaded image(s) ready for training.")
+
+        # 5. Save the final mapped and filtered dataframe
+        self.img_labels = filtered_df[['file_name', 'category_id']].reset_index(drop=True)
         self.img_dir = img_dir
         self.transform = transform
 
@@ -55,7 +66,6 @@ class FathomNetDataset(Dataset):
     def __getitem__(self, idx):
         img_name = str(self.img_labels.iloc[idx]['file_name'])
         img_path = os.path.join(self.img_dir, img_name)
-
 
         image = Image.open(img_path).convert("RGB")
 
@@ -86,9 +96,17 @@ train_loader = torch.utils.data.DataLoader(trainset, batch_size=args['batch_size
 
 ## functions to show an image
 def imshow(img):
-    #img = img / 2 + 0.5     # unnormalize
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+    img = img * std + mean
+
+    img = torch.clamp(img, 0, 1)
+
+
     npimg = img.numpy()
     plt.imshow(np.transpose(npimg, (1, 2, 0)))
+    plt.axis('off')
+    plt.show()
 
 ## get some random training images
 dataiter = iter(train_loader)
