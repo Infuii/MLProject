@@ -131,3 +131,8 @@ else:
 
 #Model
 model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
+
+
+#TRAINING FUNCTION
+
+#VALIDATE FUNCTION
