@@ -2,115 +2,128 @@
 from __future__ import print_function
 import argparse
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torchvision
 import os
 import json
 import pandas as pd
 from PIL import Image
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
+import torch.optim as optim
+from torchvision import transforms
+from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 import matplotlib.pyplot as plt
 import matplotlib
-matplotlib.use('TkAgg')
 import numpy as np
 
-import torch.optim as optim
-from torchvision import datasets, transforms
-from torch.autograd import Variable
+matplotlib.use('TkAgg')
 
-args={}
-kwargs={}
-args['batch_size']=32
-args['test_batch_size']=32
-args['epochs']=1  #The number of Epochs is the number of times you go through the full dataset.
-args['lr']=0.001 #Learning rate is how fast it will decend.
-args['momentum']=0.5 #SGD momentum (default: 0.5) Momentum is a moving average of our gradients (helps to keep direction).
+args = {}
+kwargs = {}
 
-args['seed']=1 #random seed
-args['log_interval']=10
-args['cuda']=False #if the computer has a GPU, type True, otherwise, False
+args['batch_size'] = 2
+args['test_batch_size'] = 2
+args['epochs'] = 1
+args['lr'] = 0.001
+args['momentum'] = 0.5
+args['seed'] = 1
+args['log_interval'] = 10
+args['cuda'] = torch.cuda.is_available()
 
 
 class FathomNetDataset(Dataset):
     def __init__(self, json_file, img_dir, transform=None):
-        # 1. Open the FathomNet JSON file
         with open(json_file, 'r') as f:
             coco_data = json.load(f)
 
-        # 2. Extract images and annotations into pandas DataFrames
-        images_df = pd.DataFrame(coco_data['images'])
-        annotations_df = pd.DataFrame(coco_data['annotations'])
+        # 1. Faster R-CNN DEMANDS class 0 be reserved for "Background".
+        # We map FathomNet categories to 1-32.
+        self.cat2idx = {cat['id']: i + 1 for i, cat in enumerate(coco_data['categories'])}
+        self.num_classes = len(self.cat2idx) + 1  # +1 for background
 
-        # 3. Merge them so every filename is matched with its category_id
-        merged_df = pd.merge(annotations_df, images_df, left_on='image_id', right_on='id')
+        self.images_df = pd.DataFrame(coco_data['images'])
+        self.annotations_df = pd.DataFrame(coco_data['annotations'])
 
-        # 4. CRITICAL FIX: Filter out missing images
-        # Check the hard drive and ONLY keep rows in the JSON that match downloaded files
+        # Filter out missing images
         existing_files = set(os.listdir(img_dir))
-        filtered_df = merged_df[merged_df['file_name'].isin(existing_files)]
+        self.filtered_images = self.images_df[self.images_df['file_name'].isin(existing_files)].reset_index(drop=True)
 
-        if len(filtered_df) == 0:
-            raise RuntimeError(f"Could not find any images in {img_dir} that match the JSON.")
+        if len(self.filtered_images) == 0:
+            raise RuntimeError(f"Could not find any images in {img_dir}.")
 
-        print(f"Success: Found {len(filtered_df)} downloaded image(s) ready for training.")
+        print(f"Success: Found {len(self.filtered_images)} unique images ready for training.")
 
-        # 5. Save the final mapped and filtered dataframe
-        self.img_labels = filtered_df[['file_name', 'category_id']].reset_index(drop=True)
         self.img_dir = img_dir
         self.transform = transform
 
     def __len__(self):
-        return len(self.img_labels)
+        return len(self.filtered_images)
 
     def __getitem__(self, idx):
-        img_name = str(self.img_labels.iloc[idx]['file_name'])
+        img_name = str(self.filtered_images.iloc[idx]['file_name'])
+        img_id = self.filtered_images.iloc[idx]['id']
         img_path = os.path.join(self.img_dir, img_name)
 
         image = Image.open(img_path).convert("RGB")
 
-        # Get integer label
-        label = int(self.img_labels.iloc[idx]['category_id'])
-
         if self.transform:
             image = self.transform(image)
 
-        return image, label
+        # 2. Get all annotations (animals) for this specific image
+        img_annotations = self.annotations_df[self.annotations_df['image_id'] == img_id]
 
-## transformations (Updated for 3-channel RGB images!)
+        boxes = []
+        labels = []
+
+        for _, row in img_annotations.iterrows():
+            # Convert COCO [x, y, width, height] to PyTorch [xmin, ymin, xmax, ymax]
+            xmin = row['bbox'][0]
+            ymin = row['bbox'][1]
+            xmax = xmin + row['bbox'][2]
+            ymax = ymin + row['bbox'][3]
+
+            # FathomNet edge case: prevent invalid 0-pixel boxes
+            if xmax <= xmin or ymax <= ymin:
+                continue
+
+            boxes.append([xmin, ymin, xmax, ymax])
+            labels.append(self.cat2idx[row['category_id']])
+
+        # 3. Handle unlabeled positive images (no boxes)
+        if len(boxes) == 0:
+            boxes = torch.zeros((0, 4), dtype=torch.float32)
+            labels = torch.zeros((0,), dtype=torch.int64)
+        else:
+            boxes = torch.as_tensor(boxes, dtype=torch.float32)
+            labels = torch.as_tensor(labels, dtype=torch.int64)
+
+        target = {}
+        target["boxes"] = boxes
+        target["labels"] = labels
+        target["image_id"] = torch.tensor([img_id])
+
+        return image, target
+
+
+
 transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))  # Standard RGB normalization
+    transforms.ToTensor()
 ])
 
-## download and load training dataset
-trainset = FathomNetDataset(json_file='./data/train_dataset.json',
-                            img_dir='./data/train',
-                            transform=transform)
-train_loader = torch.utils.data.DataLoader(trainset, batch_size=args['batch_size'], shuffle=True, **kwargs)
 
-## download and load testing dataset
-# testset = torchvision.datasets.MNIST(root='./data', train=False, download=True, transform=transform)
-# test_loader = torch.utils.data.DataLoader(testset, batch_size=args['test_batch_size'], shuffle=True, **kwargs)
-
-## functions to show an image
-def imshow(img):
-    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-    std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
-    img = img * std + mean
-
-    img = torch.clamp(img, 0, 1)
+full_dataset = FathomNetDataset(json_file='./data/train_dataset.json',
+                                img_dir='./data/train',
+                                transform=transform)
 
 
-    npimg = img.numpy()
-    plt.imshow(np.transpose(npimg, (1, 2, 0)))
-    plt.axis('off')
-    plt.show()
+total_size = len(full_dataset)
+train_size = int(0.8 * total_size)
+val_size = total_size - train_size
 
-## get some random training images
-dataiter = iter(train_loader)
-images, labels = next(dataiter)
 
-## show images
-imshow(torchvision.utils.make_grid(images))
+if total_size < 2:
+    print("Test Mode: Using the same image for train and validation.")
+    train_split = full_dataset
+    val_split = full_dataset
+else:
+    train_split, val_split = random_split(full_dataset, [train_size, val_size])
+    print(f"Split complete: {train_size} training images, {val_size} validation images.")
