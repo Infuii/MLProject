@@ -6,8 +6,8 @@ from ultralytics import YOLO
 
 args = {}
 
-args['batch_size'] = 2
-args['epochs'] = 1
+args['batch_size'] = 32
+args['epochs'] = 5
 args['lr'] = 0.001
 args['seed'] = 1
 args['imgsz'] = 1280
