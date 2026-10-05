@@ -1,3 +1,5 @@
+#before preparing yolo you need to install yaml and pip install ultralytics
+
 import json, os, random, yaml
 from pathlib import Path
 
