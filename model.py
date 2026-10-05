@@ -35,15 +35,15 @@ class FathomNetDataset(Dataset):
         with open(json_file, 'r') as f:
             coco_data = json.load(f)
 
-        # 1. Faster R-CNN DEMANDS class 0 be reserved for "Background".
-        # We map FathomNet categories to 1-32.
+
+        #map FathomNet categories to 1-32.
         self.cat2idx = {cat['id']: i + 1 for i, cat in enumerate(coco_data['categories'])}
         self.num_classes = len(self.cat2idx) + 1  # +1 for background
 
         self.images_df = pd.DataFrame(coco_data['images'])
         self.annotations_df = pd.DataFrame(coco_data['annotations'])
 
-        # Filter out missing images
+
         existing_files = set(os.listdir(img_dir))
         self.filtered_images = self.images_df[self.images_df['file_name'].isin(existing_files)].reset_index(drop=True)
 
@@ -68,27 +68,27 @@ class FathomNetDataset(Dataset):
         if self.transform:
             image = self.transform(image)
 
-        # 2. Get all annotations (animals) for this specific image
+
         img_annotations = self.annotations_df[self.annotations_df['image_id'] == img_id]
 
         boxes = []
         labels = []
 
         for _, row in img_annotations.iterrows():
-            # Convert COCO [x, y, width, height] to PyTorch [xmin, ymin, xmax, ymax]
+
             xmin = row['bbox'][0]
             ymin = row['bbox'][1]
             xmax = xmin + row['bbox'][2]
             ymax = ymin + row['bbox'][3]
 
-            # FathomNet edge case: prevent invalid 0-pixel boxes
+
             if xmax <= xmin or ymax <= ymin:
                 continue
 
             boxes.append([xmin, ymin, xmax, ymax])
             labels.append(self.cat2idx[row['category_id']])
 
-        # 3. Handle unlabeled positive images (no boxes)
+
         if len(boxes) == 0:
             boxes = torch.zeros((0, 4), dtype=torch.float32)
             labels = torch.zeros((0,), dtype=torch.int64)
