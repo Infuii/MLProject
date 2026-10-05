@@ -127,3 +127,7 @@ if total_size < 2:
 else:
     train_split, val_split = random_split(full_dataset, [train_size, val_size])
     print(f"Split complete: {train_size} training images, {val_size} validation images.")
+
+
+#Model
+model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
