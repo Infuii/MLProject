@@ -20,3 +20,8 @@ python download.py [-h] [-o OUTPUT_DIR] [--min-workers MIN_WORKERS] [--max-worke
 ```
 
 The script will autoscale the number of workers based on server failures.
+
+
+## TO DO
+- try downweighting the negative loss (override v8DetectionLoss)
+- take detections with high confidence (0.6-0.8) that don't overlap any groundtruth box -- add to label files and retrain (repeat for a round or two)
