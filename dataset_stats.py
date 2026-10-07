@@ -1,4 +1,9 @@
 import json, pandas as pd
+import math
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from PIL import Image
+import os
 
 with open (f"train_dataset.json") as f:
     data = json.load(f)
@@ -22,28 +27,7 @@ print (len(images), "images;", len(anns), "annotations; ", len(cats), "classes."
 class_counts = df["name"].value_counts()
 print(class_counts.describe())
 print(class_counts.head(10)); print (class_counts.tail(10))
-
-""" #plots
-import matplotlib.pyplot as plt
-
-df["area"] = df["w"] * df["h"]
-df["rel_area"] = df["area"] / (df["width"] * df["height"])
-fig, ax = plt.subplots(1, 3, figsize=(16, 4))
-class_counts.plot(kind="bar", ax=ax[0], title="Class counts", logy=True)
-df["rel_area"].plot(kind="hist", bins=50, ax=ax[1], title="Bbox area / image area")
-per_image = df.groupby("image_id").size()
-per_image.plot(kind="hist", bins=30, ax=ax[2], title="Annotations per image")
-plt.tight_layout(); plt.show() """
-
 print(class_counts.to_string())
-
-
-
-import math
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from PIL import Image
-import os
 
 def show_random_grid(n=9, cols=3, seed=None, class_name=None, figsize_per=(6, 4.5)):
     """
